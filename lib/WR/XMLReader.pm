@@ -280,7 +280,7 @@ sub read_boolean {
 
     if($len == 1) {
         $self->fh->read(my $buf, $len);
-        my $b = unpack('C<', $buf);
+        my $b = unpack('C', $buf);
         return true if($b == 1);
         $self->die('boolean error');
     } else {
