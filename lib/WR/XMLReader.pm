@@ -139,6 +139,7 @@ sub read_data {
         $self->read_element($dict, $element);
     } elsif($descriptor->{type} == 0x1) {
         $element->{text} = $self->read_string($length);
+        delete($element->{text}) if(!defined($element->{text}) || $element->{text} eq '');
     } elsif($descriptor->{type} == 0x2) {
         $element->{text} = $self->read_number($length);
     } elsif($descriptor->{type} == 0x3) {
