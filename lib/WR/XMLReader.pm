@@ -17,15 +17,15 @@ has 'fh'       => (is => 'ro', isa => 'IO::File', required => 1, lazy => 1, buil
 
 our $LEVEL = 0;
 
-sub log {
-    my $self = shift;
+sub log {};
 
-    warn "\t" x $LEVEL, join(' ', @_), "\n";
-}
+#sub log {
+#    my $self = shift;
+#    warn "\t" x $LEVEL, join(' ', @_), "\n";
+#}
 
 sub die {
     my $self = shift;
-
     die "\t" x $LEVEL, join(' ', @_), "\n";
 }
 
@@ -93,7 +93,7 @@ sub read_data_descriptor {
             address => $self->fh->tell(),
         };
 
-        $self->log('read_data_descriptor: result: address: ', $desc->{address}, ' end: ', $desc->{end});
+        $self->log('read_data_descriptor: result: type: ', $desc->{type}, ' address: ', $desc->{address}, ' end: ', $desc->{end});
         return $desc;
     } else {
         $self->die('read_data_descriptor: read failed');
@@ -136,6 +136,7 @@ sub read_data {
     $self->log('read_data: descriptor->start: ', $descriptor->{address}, ' fh->tell: ', $self->fh->tell, ' descriptor->end: ', $descriptor->{end}, ' offset: ', $offset, ' length: ', $length);
 
     if($descriptor->{type} == 0x0) {
+        # read_data on something that has childrenz?
         $self->read_element($dict, $element);
     } elsif($descriptor->{type} == 0x1) {
         $element->{text} = $self->read_string($length);
@@ -171,7 +172,36 @@ sub parse {
     my $dict = $self->read_dictionary();
     my $root = {};
     $self->read_element($dict, $root);
+
+    # when we get here, root will be filled, so recursively walk it and fix it
+    $root = $self->fix_elements($root);
+
     $self->log('done');
+    return $root;
+}
+
+sub fix_elements {
+    my $self = shift;
+    my $root = shift;
+
+    if(ref($root) eq 'ARRAY') {
+        if(scalar(@$root) == 1) {
+            return $self->fix_elements($root->[0]);
+        } else {
+            my $i = 0;
+            foreach my $element (@$root) {
+                $root->[$i] = $self->fix_elements($element);
+                $i++;
+            }
+            return $root;
+        }
+    } elsif(ref($root) eq 'HASH') {
+        foreach my $k (keys(%$root)) {
+            $root->{$k} = $self->fix_elements($root->{$k});
+        }
+        return $root;
+    } 
+
     return $root;
 }
 
@@ -285,7 +315,7 @@ sub read_boolean {
         return true if($b == 1);
         $self->die('boolean error');
     } else {
-        return 0;
+        return false;
     }
 }
 
@@ -308,24 +338,22 @@ sub read_element {
     my $data_descriptor = $self->read_data_descriptor();
     my $children = $self->read_element_descriptors($children_number);
 
-    if($children_number > 0) {
-        my $offset = $self->read_data($dict, $element, 0, $data_descriptor);
-        $self->log('read data, new offset: ', $offset);
-        my $cc = 0;
-        foreach my $c (@$children) {
-            my $node = {};
-            $self->log('reading child: ', ++$cc);
-            $offset = $self->read_data($dict, $node, $offset, $c->{descriptor});
+    my $offset = $self->read_data($dict, $element, 0, $data_descriptor);
 
-            # fix the node 
-            if(scalar(keys(%$node)) == 1 && defined($node->{text})) {
-                $element->{$dict->[$c->{name_index}]} = $node->{text};
-            } else {
-                $element->{$dict->[$c->{name_index}]} = $node;
-            }
+    $self->log('read data, new offset: ', $offset);
+    my $cc = 0;
+    foreach my $c (@$children) {
+        my $node = {};
+        $self->log('reading child: ', ++$cc);
+
+        $offset = $self->read_data($dict, $node, $offset, $c->{descriptor});
+
+        my $dname = $dict->[$c->{name_index}];
+        if(defined($node->{text})) {
+            push(@{$element->{$dname}}, $node->{text});
+        } else {
+            push(@{$element->{$dname}}, $node);
         }
-    } else {
-        $self->log('no children?');
     }
 
     $LEVEL--;
